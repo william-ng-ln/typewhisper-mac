@@ -11,6 +11,7 @@
         "de": "Cloud-Transkription plus OpenAI-/ChatGPT-Prompts. Nutzbar per API-Key oder ChatGPT-Login."
     },
     "category": "transcription",
+    "hosting": "cloud",
     "iconSystemName": "brain",
     "principalClass": "OpenAIPlugin",
     "requiresAPIKey": false

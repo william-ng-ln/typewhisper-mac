@@ -180,6 +180,104 @@ final class PluginRegistryServiceTests: XCTestCase {
         XCTAssertEqual(plugins.first?.downloadURL, "https://example.com/intel-compatible.zip")
     }
 
+    func testRegistryEntryWithCloudHostingOverridesAPIKeyRequirementForClassification() throws {
+        let data = Data(
+            """
+            {
+              "schemaVersion": 2,
+              "plugins": [
+                {
+                  "id": "com.typewhisper.openai",
+                  "name": "OpenAI / ChatGPT",
+                  "author": "TypeWhisper",
+                  "description": "Cloud transcription plus OpenAI/ChatGPT prompts.",
+                  "category": "transcription",
+                  "hosting": "cloud",
+                  "requiresAPIKey": false,
+                  "releases": [
+                    {
+                      "version": "1.1.5",
+                      "minHostVersion": "1.2.2",
+                      "sdkCompatibilityVersion": "v1",
+                      "size": 20,
+                      "downloadURL": "https://example.com/openai.zip"
+                    }
+                  ]
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(PluginRegistryResponse.self, from: data)
+        let plugin = try XCTUnwrap(response.resolvedPlugins(
+            appVersion: "1.3.0",
+            sdkCompatibilityVersion: sdkCompatibilityVersion
+        ).first)
+
+        XCTAssertEqual(plugin.hosting, .cloud)
+        XCTAssertEqual(plugin.requiresAPIKey, false)
+        XCTAssertEqual(plugin.resolvedHosting, .cloud)
+    }
+
+    func testRegistryEntryWithoutHostingFallsBackToAPIKeyRequirementForClassification() throws {
+        let data = Data(
+            """
+            {
+              "schemaVersion": 2,
+              "plugins": [
+                {
+                  "id": "com.typewhisper.remote",
+                  "name": "Remote Plugin",
+                  "author": "TypeWhisper",
+                  "description": "Remote entry",
+                  "category": "transcription",
+                  "requiresAPIKey": true,
+                  "releases": [
+                    {
+                      "version": "1.0.0",
+                      "minHostVersion": "1.0.0",
+                      "sdkCompatibilityVersion": "v1",
+                      "size": 10,
+                      "downloadURL": "https://example.com/remote.zip"
+                    }
+                  ]
+                },
+                {
+                  "id": "com.typewhisper.local",
+                  "name": "Local Plugin",
+                  "author": "TypeWhisper",
+                  "description": "Local entry",
+                  "category": "transcription",
+                  "releases": [
+                    {
+                      "version": "1.0.0",
+                      "minHostVersion": "1.0.0",
+                      "sdkCompatibilityVersion": "v1",
+                      "size": 10,
+                      "downloadURL": "https://example.com/local.zip"
+                    }
+                  ]
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(PluginRegistryResponse.self, from: data)
+        let plugins = response.resolvedPlugins(
+            appVersion: "1.3.0",
+            sdkCompatibilityVersion: sdkCompatibilityVersion
+        )
+
+        let remote = try XCTUnwrap(plugins.first { $0.id == "com.typewhisper.remote" })
+        let local = try XCTUnwrap(plugins.first { $0.id == "com.typewhisper.local" })
+        XCTAssertNil(remote.hosting)
+        XCTAssertEqual(remote.resolvedHosting, .cloud)
+        XCTAssertNil(local.hosting)
+        XCTAssertEqual(local.resolvedHosting, .local)
+    }
+
     func testMalformedPluginEntryIsSkippedInsteadOfFailingEntireRegistry() throws {
         // A single bad entry (wrong type on a required field) must not empty
         // the marketplace: the decoder reports the error and keeps the rest.

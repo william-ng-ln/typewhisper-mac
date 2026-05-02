@@ -86,6 +86,7 @@ struct RegistryPlugin: Codable, Identifiable {
     let downloadURL: String
     let iconSystemName: String?
     let requiresAPIKey: Bool?
+    let hosting: PluginHosting?
     let descriptions: [String: String]?
     let downloadCount: Int?
 
@@ -103,6 +104,10 @@ struct RegistryPlugin: Codable, Identifiable {
             minOSVersion: minOSVersion,
             supportedArchitectures: supportedArchitectures
         )
+    }
+
+    var resolvedHosting: PluginHosting {
+        hosting ?? PluginHosting.fallback(requiresAPIKey: requiresAPIKey)
     }
 }
 
@@ -153,6 +158,7 @@ struct RegistryPluginEntry: Decodable {
     let category: String
     let iconSystemName: String?
     let requiresAPIKey: Bool?
+    let hosting: PluginHosting?
     let descriptions: [String: String]?
     let downloadCount: Int?
     let releases: [RegistryPluginRelease]
@@ -165,6 +171,7 @@ struct RegistryPluginEntry: Decodable {
         case category
         case iconSystemName
         case requiresAPIKey
+        case hosting
         case descriptions
         case downloadCount
         case releases
@@ -187,6 +194,7 @@ struct RegistryPluginEntry: Decodable {
         category = try container.decode(String.self, forKey: .category)
         iconSystemName = try container.decodeIfPresent(String.self, forKey: .iconSystemName)
         requiresAPIKey = try container.decodeIfPresent(Bool.self, forKey: .requiresAPIKey)
+        hosting = try container.decodeIfPresent(PluginHosting.self, forKey: .hosting)
         descriptions = try container.decodeIfPresent([String: String].self, forKey: .descriptions)
         downloadCount = try container.decodeIfPresent(Int.self, forKey: .downloadCount)
 
@@ -258,6 +266,7 @@ struct RegistryPluginEntry: Decodable {
             downloadURL: compatibleRelease.downloadURL,
             iconSystemName: iconSystemName,
             requiresAPIKey: requiresAPIKey,
+            hosting: hosting,
             descriptions: descriptions,
             downloadCount: compatibleRelease.downloadCount ?? downloadCount
         )

@@ -316,7 +316,7 @@ jobs:
               plugin["category"] = manifest.get("category", plugin.get("category", "utility"))
               plugin["downloadCount"] = plugin.get("downloadCount", 0)
 
-              for field in ["iconSystemName", "requiresAPIKey"]:
+              for field in ["iconSystemName", "requiresAPIKey", "hosting"]:
                   if field in manifest and manifest[field] is not None:
                       plugin[field] = manifest[field]
                   else:

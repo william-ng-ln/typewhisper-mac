@@ -485,6 +485,10 @@ let wavData = PluginWavEncoder.encode(samples, sampleRate: 16000)
 | `minOSVersion` | No | Minimum macOS version (e.g. `14.0`, `26.0`). Plugin is skipped on older systems. |
 | `author` | No | Author name |
 | `principalClass` | Yes | Objective-C class name, must match `@objc(Name)` |
+| `category` | No | Marketplace category: `transcription`, `tts`, `llm`, `post-processor`, `action`, `memory`, or `utility`. |
+| `hosting` | No | Marketplace hosting classification: `local` or `cloud`. If omitted, TypeWhisper falls back to `requiresAPIKey == true` as cloud and otherwise local. |
+| `requiresAPIKey` | No | Whether the plugin specifically needs an API key credential. This is not the Local/Cloud category; use `hosting` for that. |
+| `iconSystemName` | No | SF Symbol name for marketplace and settings UI. |
 
 ---
 
@@ -510,6 +514,8 @@ Registry entry format:
   "author": "Your Name",
   "description": "What your plugin does.",
   "category": "transcription|tts|llm|post-processor|action|memory|utility",
+  "hosting": "local|cloud",
+  "requiresAPIKey": false,
   "size": 12345678,
   "downloadURL": "https://example.com/MyPlugin.zip",
   "iconSystemName": "star.fill"

@@ -52,6 +52,16 @@ final class PluginManifestValidationTests: XCTestCase {
             XCTAssertEqual(manifest.supportedArchitectures, ["arm64"], relativePath)
         }
     }
+
+    func testOpenAIPluginManifestDeclaresCloudHostingWithoutAPIKeyRequirement() throws {
+        let manifestURL = TestSupport.repoRoot.appendingPathComponent("Plugins/OpenAIPlugin/manifest.json")
+        let data = try Data(contentsOf: manifestURL)
+        let manifest = try JSONDecoder().decode(PluginManifest.self, from: data)
+
+        XCTAssertEqual(manifest.hosting, .cloud)
+        XCTAssertEqual(manifest.requiresAPIKey, false)
+        XCTAssertEqual(manifest.resolvedHosting, .cloud)
+    }
 }
 
 @MainActor
@@ -962,6 +972,7 @@ final class PluginArchitectureCompatibilityTests: XCTestCase {
                 downloadURL: "https://example.com/replacement.zip",
                 iconSystemName: nil,
                 requiresAPIKey: nil,
+                hosting: nil,
                 descriptions: nil,
                 downloadCount: nil
             ),
@@ -999,6 +1010,7 @@ final class PluginArchitectureCompatibilityTests: XCTestCase {
             downloadURL: "https://example.com/plugin.zip",
             iconSystemName: nil,
             requiresAPIKey: nil,
+            hosting: nil,
             descriptions: nil,
             downloadCount: nil
         )

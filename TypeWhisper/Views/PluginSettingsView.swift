@@ -168,6 +168,17 @@ struct PluginSettingsView: View {
         return .utility
     }
 
+    private func resolvedHosting(for plugin: LoadedPlugin, registryPlugin: RegistryPlugin?) -> PluginHosting {
+        if let hosting = registryPlugin?.hosting {
+            return hosting
+        }
+        if let hosting = plugin.manifest.hosting {
+            return hosting
+        }
+        let requiresAPIKey = registryPlugin?.requiresAPIKey == true || plugin.manifest.requiresAPIKey == true
+        return PluginHosting.fallback(requiresAPIKey: requiresAPIKey)
+    }
+
     private var groupedInstalledPlugins: [(category: PluginCategory, plugins: [LoadedPlugin])] {
         let grouped = Dictionary(grouping: pluginManager.loadedPlugins) { categoryForPlugin($0) }
         return grouped
@@ -208,15 +219,17 @@ struct PluginSettingsView: View {
 
                         if expandedCategories.contains(group.category.rawValue) {
                             ForEach(group.plugins) { plugin in
+                                let registryPlugin = registryService.registry.first(where: { $0.id == plugin.id })
                                 InstalledPluginRow(
                                     plugin: plugin,
                                     installInfo: registryService.installInfo(for: plugin.id),
                                     installState: registryService.installStates[plugin.id],
                                     externalNotice: pluginManager.externalBundleNotice(
                                         for: plugin.id,
-                                        registryPlugin: registryService.registry.first(where: { $0.id == plugin.id })
+                                        registryPlugin: registryPlugin
                                     ),
-                                    registryPlugin: registryService.registry.first(where: { $0.id == plugin.id }),
+                                    hosting: resolvedHosting(for: plugin, registryPlugin: registryPlugin),
+                                    registryPlugin: registryPlugin,
                                     onUpdate: {
                                         if let registryPlugin = registryService.registry.first(where: { $0.id == plugin.id }) {
                                             startInstall(registryPlugin)
@@ -262,8 +275,8 @@ struct PluginSettingsView: View {
             return false
         }
         switch hostingFilter {
-        case 1: return available.filter { $0.requiresAPIKey != true }
-        case 2: return available.filter { $0.requiresAPIKey == true }
+        case 1: return available.filter { $0.resolvedHosting == .local }
+        case 2: return available.filter { $0.resolvedHosting == .cloud }
         default: return available
         }
     }
@@ -421,10 +434,10 @@ struct PluginSettingsView: View {
 // MARK: - Shared Components
 
 private struct HostingBadge: View {
-    let isCloud: Bool
+    let hosting: PluginHosting
 
     var body: some View {
-        if isCloud {
+        if hosting == .cloud {
             Text("Cloud")
                 .font(.caption2)
                 .fontWeight(.medium)
@@ -493,16 +506,13 @@ private struct InstalledPluginRow: View {
     let installInfo: PluginInstallInfo
     let installState: PluginRegistryService.InstallState?
     let externalNotice: ExternalBundleNotice?
+    let hosting: PluginHosting
     let registryPlugin: RegistryPlugin?
     let onUpdate: () -> Void
     let onUninstall: () -> Void
     @State private var pluginActivity: PluginSettingsActivity?
 
     private let activityTimer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
-
-    private var isCloud: Bool {
-        registryPlugin?.requiresAPIKey == true || plugin.manifest.requiresAPIKey == true
-    }
 
     var body: some View {
         HStack {
@@ -526,7 +536,7 @@ private struct InstalledPluginRow: View {
                             .clipShape(Capsule())
                     }
                     if !plugin.isBundled {
-                        HostingBadge(isCloud: isCloud)
+                        HostingBadge(hosting: hosting)
                     }
                     if plugin.isBundled {
                         Text(String(localized: "Built-in"))
@@ -711,7 +721,7 @@ struct AvailablePluginRow: View {
                 HStack(spacing: 6) {
                     Text(plugin.name)
                         .font(.headline)
-                    HostingBadge(isCloud: plugin.requiresAPIKey == true)
+                    HostingBadge(hosting: plugin.resolvedHosting)
                 }
                 Text(plugin.localizedDescription)
                     .font(.caption)

@@ -1,5 +1,14 @@
 import Foundation
 
+public enum PluginHosting: String, Codable, Sendable {
+    case local
+    case cloud
+
+    public static func fallback(requiresAPIKey: Bool?) -> PluginHosting {
+        requiresAPIKey == true ? .cloud : .local
+    }
+}
+
 public struct PluginManifest: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
@@ -11,6 +20,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
     public let author: String?
     public let principalClass: String
     public let requiresAPIKey: Bool?
+    public let hosting: PluginHosting?
     public let iconSystemName: String?
     public let category: String?
 
@@ -25,6 +35,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         author: String? = nil,
         principalClass: String,
         requiresAPIKey: Bool? = nil,
+        hosting: PluginHosting? = nil,
         iconSystemName: String? = nil,
         category: String? = nil
     ) {
@@ -38,7 +49,14 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         self.author = author
         self.principalClass = principalClass
         self.requiresAPIKey = requiresAPIKey
+        self.hosting = hosting
         self.iconSystemName = iconSystemName
         self.category = category
+    }
+}
+
+public extension PluginManifest {
+    var resolvedHosting: PluginHosting {
+        hosting ?? PluginHosting.fallback(requiresAPIKey: requiresAPIKey)
     }
 }
