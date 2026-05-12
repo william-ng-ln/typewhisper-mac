@@ -91,6 +91,17 @@ struct UnifiedHotkey: Equatable, Hashable, Sendable, Codable {
     }
 }
 
+struct LanguageHotkey: Identifiable, Codable, Equatable, Sendable {
+    let id: UUID
+    var languageCode: String
+    var hotkey: UnifiedHotkey?
+    init(id: UUID = UUID(), languageCode: String, hotkey: UnifiedHotkey? = nil) {
+        self.id = id
+        self.languageCode = languageCode
+        self.hotkey = hotkey
+    }
+}
+
 enum HotkeySlotType: String, CaseIterable, Sendable {
     case hybrid
     case pushToTalk
@@ -135,6 +146,7 @@ final class HotkeyService: ObservableObject {
             case slot(HotkeySlotType)
             case profile(UUID)
             case workflow(UUID)
+            case language(UUID)
         }
 
         let target: Target
@@ -162,6 +174,7 @@ final class HotkeyService: ObservableObject {
     var onRecorderToggle: (() -> Void)?
     var onProfileDictationStart: ((UUID, UInt64) -> Void)?
     var onWorkflowDictationStart: ((UUID, UInt64) -> Void)?
+    var onLanguageDictationStart: ((UUID, UInt64) -> Void)?
     var onWorkflowTextProcessing: ((UUID) -> Void)?
     var onCancelPressed: (() -> Void)?
     var onPushToTalkInterruption: (() -> Void)?
@@ -172,6 +185,7 @@ final class HotkeyService: ObservableObject {
     private var activeSlotType: HotkeySlotType?
     private(set) var activeProfileId: UUID?
     private(set) var activeWorkflowId: UUID?
+    private(set) var activeLangId: UUID?
     private var pushToTalkInterruptionSignaled = false
 
     private static let toggleThreshold: TimeInterval = 1.0
@@ -270,6 +284,30 @@ final class HotkeyService: ObservableObject {
 
     private var workflowSlots: [UUID: [WorkflowHotkeyState]] = [:]
 
+    private struct LanguageHotkeyState {
+        let langId: UUID
+        var hotkey: UnifiedHotkey
+        var fnWasDown = false
+        var fnComboKeyPressed = false
+        var modifierWasDown = false
+        var keyWasDown = false
+        var mouseButtonWasDown = false
+        var lastTapUpTime: Date?
+        var tapCount: Int = 0
+
+        mutating func resetTransientState() {
+            fnWasDown = false
+            fnComboKeyPressed = false
+            modifierWasDown = false
+            keyWasDown = false
+            mouseButtonWasDown = false
+            lastTapUpTime = nil
+            tapCount = 0
+        }
+    }
+
+    private var languageSlots: [UUID: LanguageHotkeyState] = [:]
+
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var eventTap: CFMachPort?
@@ -333,6 +371,7 @@ final class HotkeyService: ObservableObject {
         activeSlotType = nil
         activeProfileId = nil
         activeWorkflowId = nil
+        activeLangId = nil
         currentMode = nil
         keyDownTime = nil
         pushToTalkInterruptionSignaled = false
@@ -358,6 +397,24 @@ final class HotkeyService: ObservableObject {
     }
 
     func isHotkeyAssignedToProfile(_: UnifiedHotkey, excludingProfileId _: UUID?) -> UUID? {
+        return nil
+    }
+
+    func registerLanguageHotkeys(_ entries: [(id: UUID, hotkey: UnifiedHotkey)]) {
+        languageSlots.removeAll()
+        for entry in entries {
+            languageSlots[entry.id] = LanguageHotkeyState(langId: entry.id, hotkey: entry.hotkey)
+        }
+        tearDownMonitor()
+        setupMonitor()
+    }
+
+    func isHotkeyAssignedToLanguageSlot(_ hotkey: UnifiedHotkey, excludingLangId: UUID?) -> UUID? {
+        for (id, state) in languageSlots where id != excludingLangId {
+            if state.hotkey.conflicts(with: hotkey) {
+                return id
+            }
+        }
         return nil
     }
 
@@ -648,6 +705,43 @@ final class HotkeyService: ObservableObject {
                 )
             }
             workflowSlots[workflowId] = states
+        }
+
+        // Language slots
+        for langId in Array(languageSlots.keys) {
+            guard var lState = languageSlots[langId] else { continue }
+            if shouldSuppressForCapsLockOrigin(event, hotkey: lState.hotkey, keyWasDown: lState.keyWasDown) {
+                lState.resetTransientState()
+                languageSlots[langId] = lState
+                continue
+            }
+            var state = SlotState(hotkey: lState.hotkey, fnWasDown: lState.fnWasDown,
+                                  fnComboKeyPressed: lState.fnComboKeyPressed,
+                                  modifierWasDown: lState.modifierWasDown, keyWasDown: lState.keyWasDown,
+                                  mouseButtonWasDown: lState.mouseButtonWasDown,
+                                  lastTapUpTime: lState.lastTapUpTime, tapCount: lState.tapCount)
+            let (keyDown, keyUp, isMatch) = processKeyEvent(
+                event,
+                hotkey: lState.hotkey,
+                state: &state,
+                fnTriggerMode: .pressThenRelease
+            )
+            lState.fnWasDown = state.fnWasDown
+            lState.fnComboKeyPressed = state.fnComboKeyPressed
+            lState.modifierWasDown = state.modifierWasDown
+            lState.keyWasDown = state.keyWasDown
+            lState.mouseButtonWasDown = state.mouseButtonWasDown
+            lState.lastTapUpTime = state.lastTapUpTime
+            lState.tapCount = state.tapCount
+            languageSlots[langId] = lState
+            if isMatch { shouldSuppress = true }
+            dispatchLanguageMatch(
+                langId: langId,
+                hotkey: lState.hotkey,
+                keyDown: keyDown,
+                keyUp: keyUp,
+                source: source
+            )
         }
 
         return shouldSuppress
@@ -1270,6 +1364,66 @@ final class HotkeyService: ObservableObject {
             activeSlotType = nil
             activeProfileId = nil
             activeWorkflowId = nil
+            currentMode = nil
+            keyDownTime = nil
+            pushToTalkInterruptionSignaled = false
+            onDictationStop?()
+        }
+    }
+
+    // MARK: - Key Down / Up (Language Slots)
+
+    private func dispatchLanguageMatch(
+        langId: UUID,
+        hotkey: UnifiedHotkey,
+        keyDown: Bool,
+        keyUp: Bool,
+        source: HotkeyEventSource
+    ) {
+        if keyDown, shouldDispatch(target: .language(langId), phase: .down, hotkey: hotkey, source: source) {
+            if source != .eventTap { logFallbackMatchIfNeeded(hotkey: hotkey, source: source) }
+            handleLanguageKeyDown(langId: langId)
+        } else if keyUp, shouldDispatch(target: .language(langId), phase: .up, hotkey: hotkey, source: source) {
+            handleLanguageKeyUp(langId: langId)
+        }
+    }
+
+    private func handleLanguageKeyDown(langId: UUID) {
+        if isActive {
+            isActive = false
+            activeSlotType = nil
+            activeProfileId = nil
+            activeWorkflowId = nil
+            activeLangId = nil
+            currentMode = nil
+            keyDownTime = nil
+            pushToTalkInterruptionSignaled = false
+            onDictationStop?()
+        } else {
+            let requestTimestamp = Self.requestTimestamp()
+            activeProfileId = nil
+            activeWorkflowId = nil
+            activeLangId = langId
+            activeSlotType = nil
+            keyDownTime = Date()
+            isActive = true
+            pushToTalkInterruptionSignaled = false
+            currentMode = .pushToTalk
+            onLanguageDictationStart?(langId, requestTimestamp)
+        }
+    }
+
+    private func handleLanguageKeyUp(langId: UUID) {
+        guard isActive, activeLangId == langId else { return }
+        guard let downTime = keyDownTime else { return }
+        if Date().timeIntervalSince(downTime) < Self.toggleThreshold {
+            currentMode = .toggle
+        } else {
+            isActive = false
+            activeSlotType = nil
+            activeProfileId = nil
+            activeWorkflowId = nil
+            activeLangId = nil
             currentMode = nil
             keyDownTime = nil
             pushToTalkInterruptionSignaled = false

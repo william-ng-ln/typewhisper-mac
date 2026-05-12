@@ -135,6 +135,8 @@ final class DictationViewModel: ObservableObject {
     }
     @Published private(set) var lastTranscribedText: String?
     @Published private(set) var lastTranscriptionLanguage: String?
+    @Published var languageHotkeys: [LanguageHotkey] = []
+    private var forcedLanguageCode: String?
     @Published var hotkeyLabelsVersion = 0
     var hybridHotkeyLabel: String { Self.loadHotkeyLabel(for: .hybrid) }
     var pttHotkeyLabel: String { Self.loadHotkeyLabel(for: .pushToTalk) }
@@ -623,6 +625,12 @@ final class DictationViewModel: ObservableObject {
             self?.startRecording(forcedWorkflowId: workflowId, requestUptimeNanoseconds: requestTimestamp)
         }
 
+        hotkeyService.onLanguageDictationStart = { [weak self] langId, requestTimestamp in
+            guard let self else { return }
+            let langCode = self.languageHotkeys.first { $0.id == langId }?.languageCode
+            self.startRecording(forcedLanguageCode: langCode, requestUptimeNanoseconds: requestTimestamp)
+        }
+
         hotkeyService.onWorkflowTextProcessing = { [weak self] workflowId in
             self?.processWorkflowHotkeyText(workflowId: workflowId)
         }
@@ -737,9 +745,11 @@ final class DictationViewModel: ObservableObject {
 
     private func startRecording(
         forcedWorkflowId: UUID? = nil,
+        forcedLanguageCode: String? = nil,
         sessionID: UUID = UUID(),
         requestUptimeNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) {
+        self.forcedLanguageCode = forcedLanguageCode
         let startTimestamp = CFAbsoluteTimeGetCurrent()
 
         // Cancel any pending transcription from a previous recording
@@ -930,10 +940,17 @@ final class DictationViewModel: ObservableObject {
     }
 
     private var effectiveLanguageSelection: LanguageSelection {
-        DictationLanguageResolver.resolve(
+        if let code = forcedLanguageCode {
+            return .exact(code)
+        }
+        return DictationLanguageResolver.resolve(
             workflow: matchedWorkflow,
             globalLanguageSelection: settingsViewModel.languageSelection
         )
+    }
+
+    var availableLanguages: [(code: String, name: String)] {
+        settingsViewModel.availableLanguages
     }
 
     private var effectiveLanguage: String? {
@@ -1306,6 +1323,72 @@ final class DictationViewModel: ObservableObject {
     /// Register profile/workflow hotkeys after app is fully initialized.
     /// Called from ServiceContainer.initialize() to avoid early monitor setup.
     func registerInitialTriggerHotkeys() { settingsHandler.registerInitialTriggerHotkeys() }
+
+    // MARK: - Language Hotkey CRUD
+
+    func addLanguageHotkey() {
+        let code = availableLanguages.first?.code ?? "en"
+        languageHotkeys.append(LanguageHotkey(languageCode: code))
+        saveLanguageHotkeys()
+    }
+
+    func deleteLanguageHotkey(id: UUID) {
+        languageHotkeys.removeAll { $0.id == id }
+        syncLanguageHotkeys()
+    }
+
+    func setLanguageHotkeyCode(id: UUID, code: String) {
+        guard let idx = languageHotkeys.firstIndex(where: { $0.id == id }) else { return }
+        languageHotkeys[idx].languageCode = code
+        saveLanguageHotkeys()
+    }
+
+    func setLanguageHotkeyHotkey(id: UUID, hotkey: UnifiedHotkey) {
+        guard let idx = languageHotkeys.firstIndex(where: { $0.id == id }) else { return }
+        languageHotkeys[idx].hotkey = hotkey
+        syncLanguageHotkeys()
+    }
+
+    func clearLanguageHotkeyHotkey(id: UUID) {
+        guard let idx = languageHotkeys.firstIndex(where: { $0.id == id }) else { return }
+        languageHotkeys[idx].hotkey = nil
+        syncLanguageHotkeys()
+    }
+
+    func isHotkeyAssignedToLanguageSlot(_ hotkey: UnifiedHotkey, excludingLangId: UUID? = nil) -> UUID? {
+        hotkeyService.isHotkeyAssignedToLanguageSlot(hotkey, excludingLangId: excludingLangId)
+    }
+
+    func clearConflictingGlobalHotkey(_ hotkey: UnifiedHotkey) {
+        for slot in HotkeySlotType.allCases {
+            if let conflict = isHotkeyAssigned(hotkey, excluding: slot) {
+                clearHotkey(for: conflict)
+                return
+            }
+        }
+    }
+
+    func loadLanguageHotkeys() {
+        guard let data = UserDefaults.standard.data(forKey: UserDefaultsKeys.languageHotkeys),
+              let decoded = try? JSONDecoder().decode([LanguageHotkey].self, from: data) else { return }
+        languageHotkeys = decoded
+        syncLanguageHotkeys()
+    }
+
+    func saveLanguageHotkeys() {
+        if let data = try? JSONEncoder().encode(languageHotkeys) {
+            UserDefaults.standard.set(data, forKey: UserDefaultsKeys.languageHotkeys)
+        }
+    }
+
+    private func syncLanguageHotkeys() {
+        saveLanguageHotkeys()
+        let entries = languageHotkeys.compactMap { entry -> (id: UUID, hotkey: UnifiedHotkey)? in
+            guard let hotkey = entry.hotkey else { return nil }
+            return (id: entry.id, hotkey: hotkey)
+        }
+        hotkeyService.registerLanguageHotkeys(entries)
+    }
 
     @available(*, deprecated, renamed: "registerInitialTriggerHotkeys")
     func registerInitialProfileHotkeys() { registerInitialTriggerHotkeys() }

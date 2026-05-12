@@ -109,9 +109,58 @@ struct HotkeySettingsView: View {
                     onClear: { dictation.clearHotkey(for: .copyLastTranscription) }
                 )
             }
+            Section(String(localized: "Spoken Language Shortcuts")) {
+                ForEach(dictation.languageHotkeys) { entry in
+                    LanguageHotkeyRow(entry: entry, dictation: dictation)
+                }
+                Button(String(localized: "Add Language Shortcut")) {
+                    dictation.addLanguageHotkey()
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
         .frame(minWidth: 500, minHeight: 300)
+    }
+}
+
+private struct LanguageHotkeyRow: View {
+    let entry: LanguageHotkey
+    @ObservedObject var dictation: DictationViewModel
+
+    var body: some View {
+        HStack {
+            Picker("", selection: Binding(
+                get: { entry.languageCode },
+                set: { dictation.setLanguageHotkeyCode(id: entry.id, code: $0) }
+            )) {
+                ForEach(dictation.availableLanguages, id: \.code) { lang in
+                    Text(lang.name).tag(lang.code)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 160)
+
+            HotkeyRecorderView(
+                label: entry.hotkey.map { HotkeyService.displayName(for: $0) } ?? "",
+                title: "",
+                onRecord: { hotkey in
+                    dictation.clearConflictingGlobalHotkey(hotkey)
+                    if let conflictId = dictation.isHotkeyAssignedToLanguageSlot(hotkey, excludingLangId: entry.id) {
+                        dictation.clearLanguageHotkeyHotkey(id: conflictId)
+                    }
+                    dictation.setLanguageHotkeyHotkey(id: entry.id, hotkey: hotkey)
+                },
+                onClear: { dictation.clearLanguageHotkeyHotkey(id: entry.id) }
+            )
+
+            Button(role: .destructive) {
+                dictation.deleteLanguageHotkey(id: entry.id)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
     }
 }

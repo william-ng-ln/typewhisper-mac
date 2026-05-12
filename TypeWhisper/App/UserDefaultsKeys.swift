@@ -18,6 +18,7 @@ enum UserDefaultsKeys {
     static let transcribeShortQuietClipsAggressively = "transcribeShortQuietClipsAggressively"
 
     // MARK: - Hotkey (JSON-encoded UnifiedHotkey per slot)
+    static let languageHotkeys = "languageHotkeys"
     static let hybridHotkey = "hybridHotkey"
     static let pttHotkey = "pttHotkey"
     static let toggleHotkey = "toggleHotkey"
