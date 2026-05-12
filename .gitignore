@@ -44,3 +44,6 @@ CodeSigning.local.xcconfig
 
 # Git worktrees
 .worktrees/
+.omc/
+.github/
+
